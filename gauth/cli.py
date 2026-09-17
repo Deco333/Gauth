@@ -77,20 +77,11 @@ def password_source(args) -> str | None:
 def common_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--vault", default=None, help="путь к файлу хранилища "
                    f"(по умолчанию {default_vault_path()})")
-    p.add_argument("--password", default=None,
-                   help="пароль хранилища (для автоматизации лучше использовать "
-                        "env GAUTH_PASSWORD или GAUTH_PASSWORD_FILE)")
-    p.add_argument("--no-cache", action="store_true",
-                   help="не использовать keyring-кэш ключа")
-    p.add_argument("--key-from-stdin", action="store_true",
-                   help="прочитать пароль/ключ из stdin (для скриптов)")
 
 
 def load_vault(args) -> Vault:
     try:
-        return Vault.open(args.vault, password=password_source(args),
-                          use_cache=not args.no_cache,
-                          key_from_stdin=getattr(args, "key_from_stdin", False))
+        return Vault.open(args.vault)
     except NoPassword as exc:
         eprint(f"✖ {exc}")
         raise SystemExit(1)
@@ -114,7 +105,7 @@ def ask_password(new: bool = False) -> str:
 
 def maybe_save(v: Vault, args) -> None:
     if v.dirty:
-        v.save(remember=not args.no_cache)
+        v.save()
 
 
 # --------------------------------------------------------------------------
@@ -126,11 +117,9 @@ def cmd_init(args) -> int:
         eprint(f"Хранилище уже существует: {path}\n(используйте --force, чтобы "
                "создать пустое заново — старое будет перезаписано)")
         return 1
-    pw = ask_password(new=True)
     v = Vault(path)
-    v.rekey(pw)
     v.entries = []
-    v.save(remember=not args.no_cache)
+    v.save()
     print(f"✔ Хранилище создано: {path}")
     print("  Дальше:  gauth import ga        (перенос из Google Authenticator)")
     print("           gauth add --name mail  (ручной ввод секрета)")
@@ -844,7 +833,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Быстрый старт:
-  1) gauth init                                  # создать зашифрованное хранилище
+  1) gauth init                                  # создать хранилище
   2) Google Authenticator → ⋮ → «Перенос аккаунтов» → «Экспорт» → скриншот QR
   3) gauth import ga --qr screenshot.png         # или --text 'otpauth-migration://…'
   4) gauth gui                                   # окно с кодами (или gauth codes)
@@ -856,7 +845,7 @@ def build_parser() -> argparse.ArgumentParser:
 """)
     sub = p.add_subparsers(dest="cmd", metavar="КОМАНДА")
 
-    sp = sub.add_parser("init", help="создать зашифрованное хранилище")
+    sp = sub.add_parser("init", help="создать хранилище")
     common_args(sp)
     sp.add_argument("--force", action="store_true", help="перезаписать существующее")
     sp.set_defaults(func=cmd_init)
@@ -1035,9 +1024,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return args.func(args) or 0
-    except WrongPassword as exc:
-        eprint(f"✖ {exc}")
-        return 1
     except NoPassword as exc:
         eprint(f"✖ {exc}")
         return 1
