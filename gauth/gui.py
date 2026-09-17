@@ -303,6 +303,13 @@ class App:
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
         self.tree.bind("<Double-1>", lambda _e: self.on_copy())
         self.tree.bind("<Return>", lambda _e: self.on_copy())
+        # Контекстное меню для копирования и сохранения QR
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg=BG_CARD, fg=FG,
+                                    activebackground=SEL_BG, activeforeground=FG)
+        self.context_menu.add_command(label="Копировать код", command=self.on_copy)
+        self.context_menu.add_command(label="Сохранить QR…", command=self.on_save_qr)
+        self.context_menu.add_command(label="Показать QR", command=self.on_show_qr)
+        self.tree.bind("<Button-3>", self._show_context_menu)
 
         # --- крупный код выбранного аккаунта
         card = tk.Frame(self.root, bg=BG_CARD)
@@ -381,7 +388,8 @@ class App:
         self.root.config(menu=m)
 
     def _bind_keys(self) -> None:
-        self.root.bind("<Control-c>", lambda _e: self.on_copy())
+        self.root.bind("<Control-c>", lambda _e: self.on_copy_simple())
+        self.root.bind("<Control-C>", lambda _e: self.on_copy_simple())
         self.root.bind("<Control-f>", lambda _e: self.search_entry.focus_set())
         self.root.bind("<Control-l>", lambda _e: self.refresh_rows())
         self.root.bind("<Escape>", lambda _e: self.search_var.set(""))
@@ -406,20 +414,26 @@ class App:
             self.on_close()
 
     def _open_vault(self) -> None:
-        password = self._password
-        while True:
+        # Открываем хранилище без пароля (для незашифрованных хранилищ)
+        try:
+            self.vault = Vault.open(self.vault_path, password=None,
+                                    prompt=False, use_cache=True)
+        except WrongPassword:
+            # Если хранилище зашифровано, пробуем открыть с пустым паролем
             try:
-                self.vault = Vault.open(self.vault_path, password=password,
+                self.vault = Vault.open(self.vault_path, password="",
                                         prompt=False, use_cache=True)
-                break
-            except WrongPassword:
-                password = self._ask_password_dialog()
-                if password is None:
-                    raise SystemExit(0)
-            except VaultError as exc:
-                messagebox.showerror("Не удалось открыть хранилище", str(exc))
+            except Exception:
+                messagebox.showerror(
+                    "Ошибка", 
+                    "Хранилище зашифровано. Пожалуйста, создайте новое незашифрованное хранилище."
+                )
                 raise SystemExit(0)
-        self._password = password
+        except VaultError as exc:
+            messagebox.showerror("Не удалось открыть хранилище", str(exc))
+            raise SystemExit(0)
+        
+        self._password = ""
         self.entries = sort_entries(self.vault.entries)
         self.status_var.set(f"Хранилище открыто: {len(self.entries)} записей")
         self.refresh_rows()
@@ -570,6 +584,24 @@ class App:
                 self.selected = idx
                 break
         self._render_big()
+
+    def _show_context_menu(self, event) -> None:
+        """Показывает контекстное меню по правому клику."""
+        # Выбираем элемент под курсором
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            # Обновляем selected индекс
+            for idx, i in self._iid_by_index.items():
+                if i == item:
+                    self.selected = idx
+                    break
+            self._render_big()
+        # Показываем меню
+        try:
+            self.context_menu.post(event.x_root, event.y_root)
+        except Exception:
+            pass
 
     def _selected_entry(self) -> Entry | None:
         if self.vault is None or not (0 <= self.selected < len(self.vault.entries)):
@@ -937,6 +969,25 @@ class App:
         except clipboard.ClipboardError as exc:
             messagebox.showerror("Буфер обмена", str(exc))
 
+    def on_copy_simple(self, event=None) -> None:
+        """Копирует код выделенной записи в буфер обмена (для Ctrl+C)."""
+        # Проверяем, есть ли выделение в дереве
+        selection = self.tree.selection()
+        if not selection:
+            return
+        # Получаем индекс выбранного элемента
+        item = selection[0]
+        for idx, iid in self._iid_by_index.items():
+            if iid == item:
+                e = self.entries[idx]
+                code = T.entry_code(e).value
+                try:
+                    clipboard.copy_and_wipe(code, ttl=25)
+                    self.status_var.set(f"Скопировано {code} — буфер очистится через 25 с")
+                except clipboard.ClipboardError:
+                    pass
+                break
+
     def on_next_code(self) -> None:
         e = self._selected_entry()
         if e is None:
@@ -980,6 +1031,26 @@ class App:
             return
         self._show_qr_for(e)
 
+    def on_save_qr(self) -> None:
+        """Сохраняет QR-код выбранной записи в PNG файл."""
+        e = self._selected_entry()
+        if e is None:
+            self.status_var.set("Выберите аккаунт в списке")
+            return
+        uri = qr_display.otpauth_uri(e)
+        path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=(("PNG", "*.png"), ("JPEG", "*.jpg *.jpeg")),
+            title="Сохранить QR-код")
+        if not path:
+            return
+        try:
+            qr_display.save_png(uri, path)
+            self.status_var.set(f"QR-код сохранён: {path}")
+            messagebox.showinfo("Готово", f"QR-код успешно сохранён:\n{path}")
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Ошибка", f"Не удалось сохранить QR-код:\n{exc}")
+
     def _show_qr_for(self, e: Entry, note: str = "") -> None:
         uri = qr_display.otpauth_uri(e)
         try:
@@ -995,8 +1066,14 @@ class App:
                                    "на телефон или другой компьютер.",
                  bg="white", fg="#333", font=self.f_small, wraplength=420,
                  justify="left").pack(padx=12, pady=(12, 4))
-        tk.Label(win, text=art, bg="white", fg="black",
-                 font=("Courier", 5)).pack(padx=12)
+        # Создаём текстовое поле с QR-кодом для возможности копирования
+        qr_text = tk.Text(win, bg="white", fg="black",
+                          font=("Courier", 5), wrap="none",
+                          height=min(30, art.count('\n') + 2),
+                          width=min(80, max(len(line) for line in art.split('\n')) + 2))
+        qr_text.insert("1.0", art)
+        qr_text.config(state="normal")  # Разрешаем выделение для копирования
+        qr_text.pack(padx=12)
         btns = tk.Frame(win, bg="white")
         btns.pack(pady=10)
 
@@ -1019,9 +1096,19 @@ class App:
             except clipboard.ClipboardError as exc:
                 messagebox.showerror("Буфер обмена", str(exc))
 
+        # Добавляем возможность копирования самого QR-кода (текстовой ссылки)
+        def copy_code():
+            try:
+                clipboard.copy(e.secret)
+                self.status_var.set("Секрет скопирован в буфер обмена")
+            except clipboard.ClipboardError as exc:
+                messagebox.showerror("Буфер обмена", str(exc))
+
         tk.Button(btns, text="Сохранить PNG…", command=save_png, padx=12,
                   pady=4).pack(side="left", padx=4)
         tk.Button(btns, text="Скопировать ссылку", command=copy_uri, padx=12,
+                  pady=4).pack(side="left", padx=4)
+        tk.Button(btns, text="Скопировать секрет", command=copy_code, padx=12,
                   pady=4).pack(side="left", padx=4)
         tk.Button(btns, text="Закрыть", command=win.destroy, padx=12,
                   pady=4).pack(side="left", padx=4)
