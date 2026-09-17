@@ -23,9 +23,9 @@ from pathlib import Path
 
 from . import clipboard, migration, qr_display, tui
 from . import totp as T
-from .cli import PROG, _finalize, password_source
+from .cli import PROG, _finalize
 from .migration import Entry
-from .vault import Vault, VaultError, WrongPassword, default_vault_path
+from .vault import Vault, VaultError, default_vault_path
 
 APP_TITLE = "gauth-pc — коды 2FA"
 
@@ -183,11 +183,9 @@ def check_tkinter() -> str | None:
 class App:
     REFRESH_MS = 250
 
-    def __init__(self, root: "tk.Tk", *, vault_path: str | None = None,
-                 password: str | None = None):
+    def __init__(self, root: "tk.Tk", *, vault_path: str | None = None):
         self.root = root
         self.vault_path = Path(vault_path) if vault_path else default_vault_path()
-        self._password = password
         self.vault: Vault | None = None
         self.entries: list[Entry] = []
         self.selected: int = -1          # индекс в self.entries
@@ -414,26 +412,13 @@ class App:
             self.on_close()
 
     def _open_vault(self) -> None:
-        # Открываем хранилище без пароля (для незашифрованных хранилищ)
+        """Открывает хранилище без пароля."""
         try:
-            self.vault = Vault.open(self.vault_path, password=None,
-                                    prompt=False, use_cache=True)
-        except WrongPassword:
-            # Если хранилище зашифровано, пробуем открыть с пустым паролем
-            try:
-                self.vault = Vault.open(self.vault_path, password="",
-                                        prompt=False, use_cache=True)
-            except Exception:
-                messagebox.showerror(
-                    "Ошибка", 
-                    "Хранилище зашифровано. Пожалуйста, создайте новое незашифрованное хранилище."
-                )
-                raise SystemExit(0)
+            self.vault = Vault.open(self.vault_path)
         except VaultError as exc:
             messagebox.showerror("Не удалось открыть хранилище", str(exc))
             raise SystemExit(0)
         
-        self._password = ""
         self.entries = sort_entries(self.vault.entries)
         self.status_var.set(f"Хранилище открыто: {len(self.entries)} записей")
         self.refresh_rows()
@@ -467,56 +452,17 @@ class App:
         return var.get() or None
 
     def _dialog_init(self) -> bool:
-        """Создание хранилища: пароль + подтверждение."""
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Новое хранилище")
-        dlg.configure(bg=BG)
-        dlg.resizable(False, False)
-        dlg.transient(self.root)
-        dlg.grab_set()
-        tk.Label(dlg, text="Придумайте пароль для хранилища кодов",
-                 bg=BG, fg=FG, font=self.f_title).pack(padx=24, pady=(20, 4),
-                                                       anchor="w")
-        tk.Label(dlg, text="Им шифруются все секретные ключи. Восстановить "
-                           "пароль невозможно.", bg=BG, fg=FG_DIM,
-                 font=self.f_small, wraplength=340, justify="left").pack(
-                     padx=24, anchor="w")
-        v1, v2 = tk.StringVar(), tk.StringVar()
-        for label, var in (("Пароль", v1), ("Повторите", v2)):
-            tk.Label(dlg, text=label, bg=BG, fg=FG_DIM,
-                     font=self.f_small).pack(padx=24, pady=(10, 2), anchor="w")
-            tk.Entry(dlg, textvariable=var, show="●", bg=BG_CARD, fg=FG,
-                     insertbackground=FG, relief="flat", font=self.f_title,
-                     width=32).pack(padx=24, ipady=5)
-        msg = tk.Label(dlg, text="", bg=BG, fg=RED, font=self.f_small,
-                       wraplength=340, justify="left")
-        msg.pack(padx=24, anchor="w")
-        result = {"ok": False}
-
-        def ok():
-            if len(v1.get()) < 6:
-                msg.config(text="Минимум 6 символов.")
-                return
-            if v1.get() != v2.get():
-                msg.config(text="Пароли не совпадают.")
-                return
-            try:
-                vault = Vault(self.vault_path)
-                vault.rekey(v1.get())
-                vault.entries = []
-                vault.save(remember=True)
-            except Exception as exc:  # noqa: BLE001
-                msg.config(text=f"Ошибка: {exc}")
-                return
-            self.vault = vault
-            self._password = v1.get()
-            result["ok"] = True
-            dlg.destroy()
-
-        tk.Button(dlg, text="Создать", command=ok, bg=ACCENT, fg="#0b0d10",
-                  relief="flat", font=self.f_title, padx=16, pady=5,
-                  cursor="hand2").pack(pady=(14, 20))
-        dlg.wait_window()
+        """Создание хранилища без пароля."""
+        try:
+            vault = Vault(self.vault_path)
+            vault.entries = []
+            vault.save()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Ошибка", f"Не удалось создать хранилище: {exc}")
+            return False
+        self.vault = vault
+        result = {"ok": True}
+        
         if result["ok"]:
             self.entries = []
             self.status_var.set("Хранилище создано. Теперь импортируйте QR.")
@@ -1148,33 +1094,10 @@ class App:
                                "использования."))
 
     def on_passwd(self) -> None:
-        if self.vault is None:
-            return
-        values = self._form_dialog(
-            "Смена пароля",
-            [("Текущий пароль", "old", ""), ("Новый пароль", "new", ""),
-             ("Повторите новый", "again", "")],
-            password_fields=("old", "new", "again"),
-            note="Хранилище будет перезашифровано новым паролем.")
-        if not values:
-            return
-        try:
-            Vault.open(self.vault_path, password=values["old"], prompt=False,
-                       use_cache=False)
-        except (WrongPassword, VaultError):
-            messagebox.showerror("Ошибка", "Текущий пароль неверный.")
-            return
-        if len(values["new"]) < 6:
-            messagebox.showerror("Ошибка", "Новый пароль должен быть не короче "
-                                           "6 символов.")
-            return
-        if values["new"] != values["again"]:
-            messagebox.showerror("Ошибка", "Новые пароли не совпадают.")
-            return
-        self.vault.rekey(values["new"])
-        self.vault.save(remember=True)
-        self._password = values["new"]
-        messagebox.showinfo("Готово", "Пароль изменён, хранилище перезашифровано.")
+        """Метод устарел: шифрование отключено."""
+        messagebox.showinfo("Информация", 
+            "Шифрование отключено. Хранилище сохраняется в открытом виде\n"
+            "с правами доступа 0600 (только ваш пользователь).")
 
     def on_doctor(self) -> None:
         lines = [f"Хранилище: {self.vault_path}",
@@ -1370,10 +1293,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog=f"{PROG} gui",
                                  description="Графический интерфейс gauth-pc")
     ap.add_argument("--vault", default=None, help="путь к файлу хранилища")
-    ap.add_argument("--password", default=None,
-                    help="пароль (обычно не нужен: спросит в окне)")
-    ap.add_argument("--selftest", type=float, default=0.0, metavar="SEC",
-                    help="открыть окно на N секунд и выйти (проверка запуска)")
     args = ap.parse_args(argv)
 
     problem = check_tkinter()
@@ -1389,8 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
-    password = args.password or password_source(args)
-    app = App(root, vault_path=args.vault, password=password)
+    app = App(root, vault_path=args.vault)
     if args.selftest:
         root.after(int(args.selftest * 1000), app.on_close)
     try:

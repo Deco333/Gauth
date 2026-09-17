@@ -19,7 +19,7 @@ from pathlib import Path
 from . import base32x, clipboard, migration, qr_display, tui
 from . import totp as T
 from .migration import Entry
-from .vault import Vault, VaultError, WrongPassword, default_vault_path
+from .vault import Vault, VaultError, default_vault_path
 
 PROG = "gauth"
 
@@ -754,30 +754,10 @@ def cmd_export(args) -> int:
 
 
 def cmd_passwd(args) -> int:
-    path = Path(args.vault) if args.vault else default_vault_path()
-    old = password_source(args)
-    if old is None:
-        old = read_secret("Текущий пароль (для проверки): ")
-    try:
-        v = Vault.open(path, password=old, prompt=False, use_cache=False)
-    except WrongPassword:
-        eprint("✖ Неверный текущий пароль — хранилище не тронуто.")
-        return 1
-    # важно: пароль из env/файла не должен попасть в запрос НОВОГО пароля
-    saved_file, saved_env = os.environ.pop("GAUTH_PASSWORD_FILE", None), \
-        os.environ.pop("GAUTH_PASSWORD", None)
-    try:
-        new = ask_password(new=True)
-    finally:
-        if saved_file is not None:
-            os.environ["GAUTH_PASSWORD_FILE"] = saved_file
-        if saved_env is not None:
-            os.environ["GAUTH_PASSWORD"] = saved_env
-    if new == old:
-        eprint("Новый пароль совпадает со старым — ничего не меняю.")
-        return 1
-    v.rekey(new)
-    v.save(remember=not args.no_cache)
+    """Метод устарел: шифрование отключено."""
+    eprint("⚠ Шифрование отключено. Хранилище сохраняется в открытом виде\n"
+           "  с правами доступа 0600 (только ваш пользователь).")
+    return 0
     print("✔ Пароль изменён, хранилище перезашифровано.")
     return 0
 
@@ -789,9 +769,6 @@ def cmd_gui(args) -> int:
     argv: list[str] = []
     if args.vault:
         argv += ["--vault", args.vault]
-    pw = password_source(args)
-    if pw:
-        argv += ["--password", pw]
     return gui.main(argv)
 
 
