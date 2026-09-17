@@ -1,0 +1,14 @@
+cryptography>=41.0
+
+# необязательно, но полезно:
+keyring>=24.0          # не спрашивать пароль при каждом запуске
+pyqrcode>=1.2.1        # печать QR в терминале (gauth qr)
+pypng>=0.20220715.0    #   ...и сохранение QR в PNG
+
+# распознавание QR со скриншота — достаточно ОДНОГО из трёх:
+zxing-cpp>=2.0         # рекомендуемый: быстрый, есть wheel'ы под Win/macOS/Linux
+opencv-python>=4.8     # альтернатива
+pyzbar>=0.1.9          # Linux: дополнительно sudo apt install libzbar0
+
+pillow>=10.0           # нужен для zxing-cpp / pyzbar
+pyperclip>=1.8         # буфер обмена, если нет xclip/wl-copy/pbcopy

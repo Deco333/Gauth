@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gauth-pc"
+version = "1.0.0"
+description = "Коды 2FA (TOTP/HOTP) на компьютере: импорт из Google Authenticator и локальная генерация кодов"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["2fa", "totp", "hotp", "google-authenticator", "otp", "rfc6238"]
+dependencies = ["cryptography>=41.0"]
+
+[project.optional-dependencies]
+# не спрашивать пароль при каждом запуске
+keyring = ["keyring>=24.0"]
+# печать QR в терминале и сохранение в PNG
+qr = ["pyqrcode>=1.2.1", "pypng>=0.20220715.0"]
+# распознавание QR со скриншота (достаточно одного бэкенда)
+scan = ["zxing-cpp>=2.0", "pillow>=10.0"]
+scan-cv = ["opencv-python>=4.8"]
+scan-zbar = ["pyzbar>=0.1.9", "pillow>=10.0"]
+clipboard = ["pyperclip>=1.8"]
+all = [
+    "cryptography>=41.0",
+    "keyring>=24.0",
+    "pyqrcode>=1.2.1",
+    "pypng>=0.20220715.0",
+    "zxing-cpp>=2.0",
+    "pillow>=10.0",
+    "pyperclip>=1.8",
+]
+
+[project.scripts]
+gauth = "gauth.cli:main"
+
+[tool.setuptools]
+packages = ["gauth"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
