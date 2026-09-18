@@ -1293,6 +1293,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog=f"{PROG} gui",
                                  description="Графический интерфейс gauth-pc")
     ap.add_argument("--vault", default=None, help="путь к файлу хранилища")
+    ap.add_argument("--selftest", type=float, default=None,
+                    help="автоматически закрыть окно через N секунд (для тестов)")
     args = ap.parse_args(argv)
 
     problem = check_tkinter()

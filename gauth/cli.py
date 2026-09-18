@@ -1003,6 +1003,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     gu = sub.add_parser("gui", help="графическое окно с кодами (tkinter)")
     common_args(gu)
+    gu.add_argument("--selftest", type=float, default=None,
+                    help="автоматически закрыть окно через N секунд (для тестов)")
     gu.set_defaults(func=cmd_gui)
 
     d = sub.add_parser("doctor", help="диагностика: зависимости, часы, vault")
